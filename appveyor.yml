@@ -1,0 +1,76 @@
+# shallow clone
+clone_depth: 10
+
+# don't build on tag
+skip_tags: true
+
+cache:
+  - C:\ProgramData\chocolatey\bin -> appveyor.yml
+  - C:\ProgramData\chocolatey\lib -> appveyor.yml
+
+os: Visual Studio 2015
+
+platform:
+  - x64
+
+configuration:
+  - Release
+
+install:
+  - git submodule update --init --recursive
+
+before_build:
+  - mkdir build
+  - cd build
+  - cmake -G "Visual Studio 14 2015 Win64" -DCITRA_USE_BUNDLED_QT=1 -DCITRA_USE_BUNDLED_SDL2=1 ..
+  - cd ..
+
+build:
+  project: build/citra.sln
+  parallel: true
+
+after_build:
+  - ps: |
+        $GITDATE = $(git show -s --date=short --format='%ad') -replace "-",""
+        $GITREV = $(git show -s --format='%h')
+        $GIT_LONG_HASH = $(git rev-parse HEAD)
+        # Where are these spaces coming from? Regardless, let's remove them
+        $MSVC_BUILD_NAME = "citra-windows-msvc-$GITDATE-$GITREV.zip" -replace " ", ""
+        $MSVC_BUILD_PDB = "citra-windows-msvc-$GITDATE-$GITREV-debugsymbols.zip" -replace " ", ""
+        $BINTRAY_VERSION = "nightly-$GIT_LONG_HASH" -replace " ", ""
+
+        # set the build names as env vars so the artifacts can upload them
+        $env:MSVC_BUILD_NAME = $MSVC_BUILD_NAME
+        $env:MSVC_BUILD_PDB = $MSVC_BUILD_PDB
+        $env:GITREV = $GITREV
+
+        7z a -tzip $MSVC_BUILD_PDB .\build\bin\release\*.pdb
+        rm .\build\bin\release\*.pdb
+        7z a -tzip $MSVC_BUILD_NAME .\build\bin\release\* .\license.txt .\README.md
+
+test_script:
+  - cd build && ctest -VV -C Release && cd ..
+
+artifacts:
+  - path: $(MSVC_BUILD_NAME)
+    name: msvcbuild
+    type: zip
+  - path: $(MSVC_BUILD_PDB)
+    name: msvcdebug
+    type: zip
+
+deploy:
+  provider: GitHub
+  release: nightly-$(appveyor_build_number)
+  description: |
+    Citra nightly releases. Please choose the correct download for your operating system from the list below.
+
+    Short Commit Hash $(GITREV)
+  auth_token:
+    secure: "dbpsMC/MgPKWFNJCXpQl4cR8FYhepkPLjgNp/pRMktZ8oLKTqPYErfreaIxb/4P1"
+  artifact: msvcbuild
+  draft: false
+  prerelease: false
+  on:
+    branch: master
+    appveyor_repo_name: citra-emu/citra-nightly
